@@ -1,270 +1,165 @@
 <?php
+require_once "config/functions.php";
 
-$dataFile = "data/items.json";
+$user = getCurrentUser();
+$error = "";
+$defaultType = isset($_GET["type"]) && in_array($_GET["type"], ["Lost", "Found"]) ? $_GET["type"] : "Lost";
 
-$type = isset($_GET["type"]) ? $_GET["type"] : "Lost";
+$categories = [
+    "Mobile",
+    "Laptop",
+    "Bag",
+    "Wallet",
+    "Keys",
+    "Documents",
+    "Jewelry",
+    "Clothing",
+    "Books",
+    "Electronics",
+    "Pets",
+    "Other"
+];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $title = trim($_POST["title"] ?? "");
+    $type = in_array($_POST["type"] ?? "", ["Lost", "Found"]) ? $_POST["type"] : "Lost";
+    $category = trim($_POST["category"] ?? "");
+    $description = trim($_POST["description"] ?? "");
+    $location = trim($_POST["location"] ?? "");
+    $date = trim($_POST["date"] ?? "");
+    $contact = trim($_POST["contact"] ?? "");
 
-    $items = [];
+    if (empty($title) || empty($category) || empty($description) || empty($location) || empty($date) || empty($contact)) {
+        $error = "Please fill in all required fields.";
+    } else {
+        $imagePath = "";
 
-    if (file_exists($dataFile)) {
+        // Handle Image Upload
+        if (isset($_FILES["image"]) && $_FILES["image"]["error"] === UPLOAD_ERR_OK) {
+            $uploadResult = handleImageUpload("image", "uploads/items/");
+            if ($uploadResult["success"]) {
+                $imagePath = $uploadResult["path"];
+            } else {
+                $error = $uploadResult["error"] ?? "Failed to upload image.";
+            }
+        }
 
-        $json = file_get_contents($dataFile);
-        $items = json_decode($json, true);
+        if (empty($error)) {
+            $newItem = [
+                "user_id" => $user ? $user["id"] : null,
+                "title" => $title,
+                "type" => $type,
+                "category" => $category,
+                "description" => $description,
+                "location" => $location,
+                "date" => $date,
+                "contact" => $contact,
+                "status" => "Active",
+                "image" => $imagePath
+            ];
 
-        if (!is_array($items)) {
-            $items = [];
+            $savedId = saveItem($newItem);
+            header("Location: details.php?id=" . urlencode($savedId) . "&created=1");
+            exit;
         }
     }
-
-    $newItem = [
-
-        "id" => time(),
-
-        "title" => $_POST["title"],
-
-        "category" => $_POST["category"],
-
-        "description" => $_POST["description"],
-
-        "location" => $_POST["location"],
-
-        "date" => $_POST["date"],
-
-        "type" => $_POST["type"],
-
-        "contact" => $_POST["contact"],
-
-        "image" => ""
-
-    ];
-
-
-    if (isset($_FILES["image"]) && $_FILES["image"]["error"] === 0) {
-
-        $uploadDir = "uploads/";
-
-        $fileName = time() . "_" . basename($_FILES["image"]["name"]);
-
-        $target = $uploadDir . $fileName;
-
-        if (move_uploaded_file($_FILES["image"]["tmp_name"], $target)) {
-
-            $newItem["image"] = $target;
-
-        }
-    }
-
-
-    $items[] = $newItem;
-
-    file_put_contents(
-        $dataFile,
-        json_encode($items, JSON_PRETTY_PRINT)
-    );
-
-
-    header("Location: items.php");
-    exit;
 }
-
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
     <meta charset="UTF-8">
-
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report Item - Lost & Found</title>
-
     <link rel="stylesheet" href="css/style.css">
-
 </head>
-
 <body>
 
-
 <header class="header">
-
-    <div class="logo">
-        🔎 Lost<span>&</span>Found
-    </div>
-
+    <a href="index.php" class="logo">
+        <span>🔎</span> Lost<span>&</span>Found
+    </a>
     <nav>
-
-        <a href="index.php">
-            Home
-        </a>
-
-        <a href="items.php">
-            Browse Items
-        </a>
-
-        <a href="report.php">
-            Report Item
-        </a>
-
-        <?php if (isset($_SESSION["user_id"])): ?>
-
-            <a href="dashboard.php">
-                Dashboard
-            </a>
-
-            <a href="logout.php">
-                Logout
-            </a>
-
+        <a href="index.php">Home</a>
+        <a href="items.php">Browse Items</a>
+        <a href="report.php" class="active">Report Item</a>
+        <?php if ($user): ?>
+            <a href="dashboard.php">Dashboard</a>
+            <a href="my-reports.php">My Reports</a>
+            <a href="logout.php">Logout</a>
         <?php else: ?>
-
-            <a href="login.php">
-                Login
-            </a>
-
-            <a
-                href="register.php"
-                class="nav-register"
-            >
-                Register
-            </a>
-
+            <a href="login.php">Login</a>
+            <a href="register.php" class="nav-register">Register</a>
         <?php endif; ?>
-
     </nav>
-
 </header>
 
-
 <div class="form-container">
-
     <div class="form-card">
-
         <h1>Report an Item</h1>
+        <p>Fill in the details to publish a lost or found report to the community.</p>
 
-        <p>
-            Tell us about the item you lost or found.
-        </p>
+        <?php if ($error): ?>
+            <div class="error-message">
+                <?= e($error) ?>
+            </div>
+        <?php endif; ?>
 
+        <form method="POST" action="report.php" enctype="multipart/form-data">
+            <div class="form-row">
+                <div>
+                    <label for="type">Report Type *</label>
+                    <select name="type" id="type" required>
+                        <option value="Lost" <?= (isset($_POST['type']) ? $_POST['type'] : $defaultType) === "Lost" ? "selected" : "" ?>>Lost Item</option>
+                        <option value="Found" <?= (isset($_POST['type']) ? $_POST['type'] : $defaultType) === "Found" ? "selected" : "" ?>>Found Item</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="category">Category *</label>
+                    <select name="category" id="category" required>
+                        <option value="">-- Select Category --</option>
+                        <?php foreach ($categories as $cat): ?>
+                            <option value="<?= e($cat) ?>" <?= (isset($_POST['category']) && $_POST['category'] === $cat) ? "selected" : "" ?>>
+                                <?= e($cat) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
 
-        <form method="POST"
-              enctype="multipart/form-data">
+            <label for="title">Item Name / Title *</label>
+            <input type="text" id="title" name="title" placeholder="e.g. Black Leather Wallet with Student ID" value="<?= isset($_POST['title']) ? e($_POST['title']) : '' ?>" required>
 
+            <label for="description">Detailed Description *</label>
+            <textarea id="description" name="description" placeholder="Provide distinct characteristics, brand, color, unique marks, etc." required><?= isset($_POST['description']) ? e($_POST['description']) : '' ?></textarea>
 
-            <label>Item Type</label>
+            <div class="form-row">
+                <div>
+                    <label for="location">Location Lost/Found *</label>
+                    <input type="text" id="location" name="location" placeholder="e.g. Central Library, 2nd Floor" value="<?= isset($_POST['location']) ? e($_POST['location']) : '' ?>" required>
+                </div>
+                <div>
+                    <label for="date">Date *</label>
+                    <input type="date" id="date" name="date" value="<?= isset($_POST['date']) ? e($_POST['date']) : date('Y-m-d') ?>" required>
+                </div>
+            </div>
 
-            <select name="type" required>
+            <label for="contact">Contact Information *</label>
+            <input type="text" id="contact" name="contact" placeholder="Phone number, Email, or WhatsApp" value="<?= isset($_POST['contact']) ? e($_POST['contact']) : ($user ? e($user['email']) : '') ?>" required>
 
-                <option value="Lost"
-                    <?php echo $type === "Lost" ? "selected" : ""; ?>>
-                    Lost Item
-                </option>
+            <label for="image">Item Photo (Optional)</label>
+            <input type="file" id="image" name="image" accept="image/png, image/jpeg, image/webp, image/gif">
+            <div class="image-preview-wrapper" style="display:none;"></div>
 
-                <option value="Found"
-                    <?php echo $type === "Found" ? "selected" : ""; ?>>
-                    Found Item
-                </option>
-
-            </select>
-
-
-            <label>Item Name</label>
-
-            <input
-                type="text"
-                name="title"
-                placeholder="Example: Black Samsung Phone"
-                required
-            >
-
-
-            <label>Category</label>
-
-            <select name="category" required>
-
-                <option value="">Select Category</option>
-
-                <option>Mobile</option>
-                <option>Laptop</option>
-                <option>Bag</option>
-                <option>Wallet</option>
-                <option>Keys</option>
-                <option>Documents</option>
-                <option>Jewelry</option>
-                <option>Clothing</option>
-                <option>Other</option>
-
-            </select>
-
-
-            <label>Description</label>
-
-            <textarea
-                name="description"
-                placeholder="Describe the item..."
-                required
-            ></textarea>
-
-
-            <label>Location</label>
-
-            <input
-                type="text"
-                name="location"
-                placeholder="Where was it lost/found?"
-                required
-            >
-
-
-            <label>Date</label>
-
-            <input
-                type="date"
-                name="date"
-                required
-            >
-
-
-            <label>Contact Information</label>
-
-            <input
-                type="text"
-                name="contact"
-                placeholder="Phone or Email"
-                required
-            >
-
-
-            <label>Item Image</label>
-
-            <input
-                type="file"
-                name="image"
-                accept="image/*"
-            >
-
-
-            <button type="submit" class="btn primary full">
-                Submit Report
-            </button>
-
+            <button type="submit" class="auth-button">Publish Report</button>
         </form>
-
     </div>
-
 </div>
 
-
 <footer>
-
-    <p>© 2026 Lost & Found</p>
-
+    <p>© <?= date("Y") ?> Lost & Found Community Platform</p>
 </footer>
 
-
+<script src="js/script.js"></script>
 </body>
 </html>
